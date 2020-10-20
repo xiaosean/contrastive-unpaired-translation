@@ -1,3 +1,6 @@
+import glob
+import shutil
+
 import numpy as np
 import os
 import sys
@@ -5,42 +8,19 @@ import ntpath
 import time
 from . import util, html
 from subprocess import Popen, PIPE
+from options.test_options import TestOptions
+from data import create_dataset
+import torchvision.utils as vutils
+import torch
+from torchvision import transforms
+
+
+from PIL import Image
 
 if sys.version_info[0] == 2:
     VisdomExceptionBase = Exception
 else:
     VisdomExceptionBase = ConnectionError
-
-
-def save_images(webpage, visuals, image_path, aspect_ratio=1.0, width=256):
-    """Save images to the disk.
-
-    Parameters:
-        webpage (the HTML class) -- the HTML webpage class that stores these imaegs (see html.py for more details)
-        visuals (OrderedDict)    -- an ordered dictionary that stores (name, images (either tensor or numpy) ) pairs
-        image_path (str)         -- the string is used to create image paths
-        aspect_ratio (float)     -- the aspect ratio of saved images
-        width (int)              -- the images will be resized to width x width
-
-    This function will save images stored in 'visuals' to the HTML file specified by 'webpage'.
-    """
-    image_dir = webpage.get_image_dir()
-    short_path = ntpath.basename(image_path[0])
-    name = os.path.splitext(short_path)[0]
-
-    webpage.add_header(name)
-    ims, txts, links = [], [], []
-
-    for label, im_data in visuals.items():
-        im = util.tensor2im(im_data)
-        image_name = '%s/%s.png' % (label, name)
-        os.makedirs(os.path.join(image_dir, label), exist_ok=True)
-        save_path = os.path.join(image_dir, image_name)
-        util.save_image(im, save_path, aspect_ratio=aspect_ratio)
-        ims.append(image_name)
-        txts.append(label)
-        links.append(image_name)
-    webpage.add_images(ims, txts, links, width=width)
 
 
 class Visualizer():
@@ -69,6 +49,8 @@ class Visualizer():
         self.name = opt.name
         self.port = opt.display_port
         self.saved = False
+        self.epoch_queue = []
+        # self.
         if self.display_id > 0:  # connect to a visdom server given <display_port> and <display_server>
             import visdom
             self.plot_data = {}
@@ -173,6 +155,8 @@ class Visualizer():
                 img_path = os.path.join(self.img_dir, 'epoch%.3d_%s.png' % (epoch, label))
                 util.save_image(image_numpy, img_path)
 
+
+
             # update website
             webpage = html.HTML(self.web_dir, 'Experiment name = %s' % self.name, refresh=0)
             for n in range(epoch, 0, -1):
@@ -187,6 +171,158 @@ class Visualizer():
                     links.append(img_path)
                 webpage.add_images(ims, txts, links, width=self.win_size)
             webpage.save()
+
+    def save_overview_result(self, model, epoch):
+        opt = TestOptions().parse()  # get test options
+        # hard-code some parameters for test
+        opt.phase = "valid"
+        opt.results_dir = model.save_dir
+        opt.num_threads = 0  # test code only supports num_threads = 1
+        opt.batch_size = 1  # test code only supports batch_size = 1
+        opt.serial_batches = True  # disable data shuffling; comment this line if results on randomly chosen images are needed.
+        opt.no_flip = True  # no flip; comment this line if results on flipped images are needed.
+        opt.display_id = -1  # no visdom display; the test code saves the results to a HTML file.
+        dataset = create_dataset(opt)  # create a dataset given opt.dataset_mode and other options
+
+        # create a webpage for viewing the results
+
+        print('starting save_visual_validset')
+        # webpage = html.HTML(cur_valid_dir, 'Experiment = %s, Phase = %s, Epoch = %s' % (opt.name, opt.phase, opt.epoch))
+        model.opt.isTrain = False
+        cur_valid_dir = os.path.join(self.img_dir, "valid", '{}'.format(epoch))  # define the website directory
+        util.mkdirs(cur_valid_dir)
+        model_out_dirs = ["real_A", "fake_B", "real_B"]
+        mk_path = [os.path.join(cur_valid_dir, dir_name) for dir_name in model_out_dirs]
+        util.mkdirs(mk_path)
+
+
+        all_images = {k: None for k in model_out_dirs}
+        display_image_num = len(dataset)
+        for i, data in enumerate(dataset):
+            if i == 0:
+                model.data_dependent_initialize(data)
+                if opt.eval:
+                    model.eval()
+            if i >= opt.num_test:  # only apply our model to opt.num_test images.
+                break
+            model.set_input(data)  # unpack data from data loader
+            model.test()  # run inference
+            visuals = model.get_current_visuals()  # get image results
+            for label, im_data in visuals.items():
+                if label in all_images:
+                    if all_images[label] is None:
+                        all_images[label] = im_data
+                    else:
+                        all_images[label] = torch.cat((all_images[label], im_data))
+
+        image_tensor = torch.cat([all_images[d] for d in model_out_dirs], dim=0)
+        image_grid = vutils.make_grid(image_tensor.data, nrow=display_image_num, padding=0, normalize=True)
+        out_filename = os.path.join(self.img_dir, 'epoch_{000}_overview.png'.format(epoch))
+        vutils.save_image(image_grid, out_filename, nrow=1)
+        # self.display_current_results_by_path(aggr_webpage, epoch, opt=opt)
+        # aggr_webpage.save()
+
+        # webpage.save()  # save the HTML
+        model.opt.isTrain = True
+
+    def display_current_results_by_path(self, webpage, epoch, opt=None, display_rows=50):
+        if opt is None:
+            opt = TestOptions().parse()  # get test options
+
+        # update website
+        # contain 0 epoch
+        self.epoch_queue += [epoch]
+        if len(self.epoch_queue) > display_rows:
+            # remove front
+            self.epoch_queue = self.epoch_queue[1:]
+        # desceneding
+        for n in self.epoch_queue[::-1]:
+            webpage.add_header('epoch [%d]' % n)
+            ims = [os.path.join(webpage.get_image_dir(), 'epoch_{000}.png'.format(n))]
+            txts = ['epoch_{000}.png'.format(n)]
+            links = [os.path.join(webpage.get_image_dir(), 'epoch_{000}.png'.format(n))]
+
+            # for label, image_path in image_paths.items():
+            #     assert isinstance(image_path, str)
+            #     img_path = 'epoch%.3d_%s.jpg' % (n, label)
+            #     ims.append(img_path)
+            #     txts.append(label)
+            #     links.append(img_path)
+            if len(ims) < 10:
+                webpage.add_images(ims, txts, links, width=self.win_size)
+            # else:
+            #     num = int(round(len(ims)/2.0))
+            #     webpage.add_images(ims[:num], txts[:num], links[:num], width=self.win_size)
+            #     webpage.add_images(ims[num:], txts[num:], links[num:], width=self.win_size)
+
+
+    def save_images(self, webpage, visuals, image_path, aspect_ratio=1.0, width=256):
+        """Save images to the disk.
+
+        Parameters:
+            webpage (the HTML class) -- the HTML webpage class that stores these imaegs (see html.py for more details)
+            visuals (OrderedDict)    -- an ordered dictionary that stores (name, images (either tensor or numpy) ) pairs
+            image_path (str)         -- the string is used to create image paths
+            aspect_ratio (float)     -- the aspect ratio of saved images
+            width (int)              -- the images will be resized to width x width
+
+        This function will save images stored in 'visuals' to the HTML file specified by 'webpage'.
+        """
+        image_dir = webpage.get_image_dir()
+        short_path = ntpath.basename(image_path[0])
+        name = os.path.splitext(short_path)[0]
+
+        webpage.add_header(name)
+        ims, txts, links = [], [], []
+
+        for label, im_data in visuals.items():
+            if label in ['real_A', 'fake_B', 'real_B']:
+                im = util.tensor2im(im_data)
+                image_name = '%s/%s.png' % (label, name)
+                os.makedirs(os.path.join(image_dir, label), exist_ok=True)
+                save_path = os.path.join(image_dir, image_name)
+                util.save_image(im, save_path, aspect_ratio=aspect_ratio)
+                ims.append(image_name)
+                txts.append(label)
+                links.append(image_name)
+        webpage.add_images(ims, txts, links, width=width)
+
+
+    def save_overview_images(self, webpage):
+        """Save overview images from result dir.
+
+        Parameters:
+            webpage (the HTML class) -- the HTML webpage class that stores these imaegs (see html.py for more details)
+            visuals (OrderedDict)    -- an ordered dictionary that stores (name, images (either tensor or numpy) ) pairs
+            image_path (str)         -- the string is used to create image paths
+            aspect_ratio (float)     -- the aspect ratio of saved images
+            width (int)              -- the images will be resized to width x width
+
+        This function will save images stored in 'visuals' to the HTML file specified by 'webpage'.
+        """
+        image_tensor = torch.cat([images[:display_image_num] for images in image_outputs], 0)
+        image_grid = vutils.make_grid(image_tensor.data, nrow=display_image_num, padding=0, normalize=True)
+
+        vutils.save_image(image_grid, file_name, nrow=1)
+
+        # from PIL import Image
+        grid = vutils.make_grid(image_grid, nrow=8, padding=2, pad_value=0,
+                                normalize=False, range=None, scale_each=False)
+
+        return grid.to('cpu', torch.uint8).numpy()
+
+        #
+        # for label, im_data in visuals.items():
+        #     if label in ['real_A', 'fake_B', 'real_B']:
+        #         im = util.tensor2im(im_data)
+        #         image_name = '%s/%s.png' % (label, name)
+        #         os.makedirs(os.path.join(image_dir, label), exist_ok=True)
+        #         save_path = os.path.join(image_dir, image_name)
+        #         util.save_image(im, save_path, aspect_ratio=aspect_ratio)
+        #         ims.append(image_name)
+        #         txts.append(label)
+        #         links.append(image_name)
+        # webpage.add_images(ims, txts, links, width=width)
 
     def plot_current_losses(self, epoch, counter_ratio, losses):
         """display the current losses on visdom display: dictionary of error labels and values

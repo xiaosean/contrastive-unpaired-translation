@@ -557,6 +557,7 @@ class PatchSampleF(nn.Module):
             self.create_mlp(feats)
         for feat_id, feat in enumerate(feats):
             B, H, W = feat.shape[0], feat.shape[2], feat.shape[3]
+            # print("B H W =", B, H, W)
             feat_reshape = feat.permute(0, 2, 3, 1).flatten(1, 2)
             if num_patches > 0:
                 if patch_ids is not None:
@@ -576,7 +577,9 @@ class PatchSampleF(nn.Module):
 
             if num_patches == 0:
                 x_sample = x_sample.permute(0, 2, 1).reshape([B, x_sample.shape[-1], H, W])
+            # print("x_sample.shape =", x_sample.shape)
             return_feats.append(x_sample)
+        # print("return_feats size =", len(return_feats))
         return return_feats, return_ids
 
 
