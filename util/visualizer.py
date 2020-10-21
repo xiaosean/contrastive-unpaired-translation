@@ -50,13 +50,14 @@ class Visualizer():
         self.port = opt.display_port
         self.saved = False
         self.epoch_queue = []
+        self.show_images = {}
         # self.
         if self.display_id > 0:  # connect to a visdom server given <display_port> and <display_server>
             import visdom
             self.plot_data = {}
             self.ncols = opt.display_ncols
             if "tensorboard_base_url" not in os.environ:
-                self.vis = visdom.Visdom(server=opt.display_server, port=opt.display_port, env=opt.display_env)
+                self.vis = visdom.Visdom(server=opt.display_server, port=opt.display_port, env=opt.name)
             else:
                 self.vis = visdom.Visdom(port=2004,
                                          base_url=os.environ['tensorboard_base_url'] + '/visdom')
@@ -85,7 +86,7 @@ class Visualizer():
         print('Command: %s' % cmd)
         Popen(cmd, shell=True, stdout=PIPE, stderr=PIPE)
 
-    def display_current_results(self, visuals, epoch, save_result):
+    def display_current_results(self, visuals, epoch, save_result, model=None):
         """Display current results on visdom; save current results to an HTML file.
 
         Parameters:
@@ -158,19 +159,28 @@ class Visualizer():
 
 
             # update website
+            print("start save overview result")
+
             webpage = html.HTML(self.web_dir, 'Experiment name = %s' % self.name, refresh=0)
             for n in range(epoch, 0, -1):
                 webpage.add_header('epoch [%d]' % n)
                 ims, txts, links = [], [], []
 
                 for label, image_numpy in visuals.items():
-                    image_numpy = util.tensor2im(image)
                     img_path = 'epoch%.3d_%s.png' % (n, label)
                     ims.append(img_path)
                     txts.append(label)
                     links.append(img_path)
+                if model:
+                    self.save_overview_result(model, epoch)
+                    img_path = 'epoch%.3d_%s.png' % (n, "overview")
+                    print("overview img_path = ", img_path)
+                    ims.append(img_path)
+                    txts.append("Overview")
+                    links.append(img_path)
                 webpage.add_images(ims, txts, links, width=self.win_size)
             webpage.save()
+
 
     def save_overview_result(self, model, epoch):
         opt = TestOptions().parse()  # get test options
@@ -217,7 +227,12 @@ class Visualizer():
 
         image_tensor = torch.cat([all_images[d] for d in model_out_dirs], dim=0)
         image_grid = vutils.make_grid(image_tensor.data, nrow=display_image_num, padding=0, normalize=True)
-        out_filename = os.path.join(self.img_dir, 'epoch_{000}_overview.png'.format(epoch))
+        try:
+            self.vis.images(image_grid, 1, 2, self.display_id + 2,
+                            None, dict(title='overview images'))
+        except VisdomExceptionBase:
+            self.create_visdom_connections()
+        out_filename = os.path.join(self.img_dir, 'epoch%.3d_overview.png'% epoch)
         vutils.save_image(image_grid, out_filename, nrow=1)
         # self.display_current_results_by_path(aggr_webpage, epoch, opt=opt)
         # aggr_webpage.save()

@@ -54,8 +54,7 @@ if __name__ == '__main__':
                 save_result = total_iters % opt.update_html_freq == 0
                 model.compute_visuals()
                 # For validation part
-                visualizer.display_current_results(model.get_current_visuals(), epoch, save_result)
-                visualizer.save_overview_result(model, epoch)
+                visualizer.display_current_results(model.get_current_visuals(), epoch, save_result, model=model)
 
 
             if total_iters % opt.print_freq == 0:    # print training losses and save logging information to the disk
