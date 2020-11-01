@@ -195,8 +195,8 @@ class CUTModel(BaseModel):
         self.loss_G = self.loss_G_GAN + loss_NCE_both
         return self.loss_G
 
-    def calculate_NCE_loss(self, src, tgt):
-        n_layers = len(self.nce_layers)
+    def calculate_NCE_loss(self, src, tgt):  # realA, fakeB
+        n_layers = len(self.nce_layers)  # nce_layers: 0,4,8,12,16
         feat_q = self.netG(tgt, self.nce_layers, encode_only=True)
         if self.opt.flip_equivariance and self.flipped_for_equivariance:
             feat_q = [torch.flip(fq, [3]) for fq in feat_q]

@@ -156,7 +156,8 @@ class Visualizer():
                 img_path = os.path.join(self.img_dir, 'epoch%.3d_%s.png' % (epoch, label))
                 util.save_image(image_numpy, img_path)
 
-
+                if model:
+                    self.save_overview_result(model, epoch)
 
             # update website
             print("start save overview result")
@@ -172,9 +173,8 @@ class Visualizer():
                     txts.append(label)
                     links.append(img_path)
                 if model:
-                    self.save_overview_result(model, epoch)
                     img_path = 'epoch%.3d_%s.png' % (n, "overview")
-                    print("overview img_path = ", img_path)
+                    # print("overview img_path = ", img_path)
                     ims.append(img_path)
                     txts.append("Overview")
                     links.append(img_path)
@@ -271,7 +271,7 @@ class Visualizer():
             #     webpage.add_images(ims[num:], txts[num:], links[num:], width=self.win_size)
 
 
-    def save_images(self, webpage, visuals, image_path, aspect_ratio=1.0, width=256):
+    def save_images(webpage, visuals, image_path, aspect_ratio=1.0, width=256):
         """Save images to the disk.
 
         Parameters:
