@@ -61,6 +61,7 @@ class CUTModel(BaseModel):
         self.loss_names = ['G_GAN', 'D_real', 'D_fake', 'G', 'NCE']
         self.visual_names = ['real_A', 'fake_B', 'real_B']
         self.nce_layers = [int(i) for i in self.opt.nce_layers.split(',')]
+        self.zero_tensor = None
 
         if opt.nce_idt and self.isTrain:
             self.loss_names += ['NCE_Y']
@@ -155,6 +156,12 @@ class CUTModel(BaseModel):
         self.fake_B = self.fake[:self.real_A.size(0)]
         if self.opt.nce_idt:
             self.idt_B = self.fake[self.real_A.size(0):]
+
+    def get_zero_tensor(self, input):
+        if self.zero_tensor is None:
+            self.zero_tensor = torch.FloatTensor(1).fill_(0).cuda()
+            self.zero_tensor.requires_grad_(False)
+        return self.zero_tensor.expand_as(input)
 
     def compute_D_loss(self):
         """Calculate GAN loss for the discriminator"""
