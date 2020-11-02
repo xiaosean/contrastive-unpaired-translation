@@ -5,6 +5,8 @@ from torch.nn import init
 import functools
 from torch.optim import lr_scheduler
 import numpy as np
+import torch.nn.utils.spectral_norm as spectral_norm
+
 from .stylegan_networks import StyleGAN2Discriminator, StyleGAN2Generator, TileStyleGAN2Discriminator
 
 ###############################################################################
@@ -323,6 +325,9 @@ def define_D(input_nc, ndf, netD, n_layers_D=3, norm='batch', init_type='normal'
         net = NLayerDiscriminator(input_nc, ndf, n_layers_D, norm_layer=norm_layer, no_antialias=no_antialias,)
     elif netD == 'pixel':     # classify if each pixel is real or fake
         net = PixelDiscriminator(input_nc, ndf, norm_layer=norm_layer)
+    elif netD == 'basic_sn':  # more options
+        # TODO: norm_layer = sn
+        net = NLayerDiscriminator(input_nc, ndf, n_layers_D, norm_layer='sn', no_antialias=no_antialias,)
     elif 'stylegan2' in netD:
         net = StyleGAN2Discriminator(input_nc, ndf, n_layers_D, no_antialias=no_antialias, opt=opt)
     else:
@@ -807,6 +812,8 @@ class Conv2dBlock(nn.Module):
             self.norm = nn.InstanceNorm2d(norm_dim, track_running_stats=False)
         elif norm == 'ln':
             self.norm = LayerNorm(norm_dim)
+        elif norm == 'sn':
+            self.norm = spectral_norm(norm_dim)
         elif norm == 'none':
             self.norm = None
         else:
