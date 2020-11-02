@@ -158,17 +158,35 @@ class CUTModel(BaseModel):
 
     def compute_D_loss(self):
         """Calculate GAN loss for the discriminator"""
-        fake = self.fake_B.detach()
-        # Fake; stop backprop to the generator by detaching fake_B
-        pred_fake = self.netD(fake)
-        self.loss_D_fake = self.criterionGAN(pred_fake, False).mean()
-        # Real
-        self.pred_real = self.netD(self.real_B)
-        loss_D_real = self.criterionGAN(self.pred_real, True)
-        self.loss_D_real = loss_D_real.mean()
+        if self.opt.hinge_loss:
+            print("compute_D_loss - run hinge loss")
+            # Following SPADE code:https://github.com/NVlabs/SPADE/blob/0ff661e70131c9b85091d11a66e019c0f2062d4c/models/networks/loss.py
 
-        # combine loss and calculate gradients
-        self.loss_D = (self.loss_D_fake + self.loss_D_real) * 0.5
+            # Target is real
+            self.pred_real = self.netD(self.real_B)
+            minval = torch.min(self.pred_real - 1, self.get_zero_tensor(self.pred_real))
+            self.loss_D_real = -torch.mean(minval)
+
+            # Target is fake
+            fake = self.fake_B.detach()
+            # Fake; stop backprop to the generator by detaching fake_B
+            pred_fake = self.netD(fake)
+            minval = torch.min(-pred_fake - 1, self.get_zero_tensor(pred_fake))
+            self.loss_D_fake = -torch.mean(minval)
+            self.loss_D = (self.loss_D_fake + self.loss_D_real) * 0.5
+
+        else:
+            fake = self.fake_B.detach()
+            # Fake; stop backprop to the generator by detaching fake_B
+            pred_fake = self.netD(fake)
+            self.loss_D_fake = self.criterionGAN(pred_fake, False).mean()
+            # Real
+            self.pred_real = self.netD(self.real_B)
+            loss_D_real = self.criterionGAN(self.pred_real, True)
+            self.loss_D_real = loss_D_real.mean()
+
+            # combine loss and calculate gradients
+            self.loss_D = (self.loss_D_fake + self.loss_D_real) * 0.5
         return self.loss_D
 
     def compute_G_loss(self):
@@ -177,7 +195,11 @@ class CUTModel(BaseModel):
         # First, G(A) should fake the discriminator
         if self.opt.lambda_GAN > 0.0:
             pred_fake = self.netD(fake)
-            self.loss_G_GAN = self.criterionGAN(pred_fake, True).mean() * self.opt.lambda_GAN
+            if self.opt.hinge_loss:
+                print("compute_G_loss - run hinge loss")
+                self.loss_G_GAN = -torch.mean(pred_fake) * self.opt.lambda_GAN
+            else:
+                self.loss_G_GAN = self.criterionGAN(pred_fake, True).mean() * self.opt.lambda_GAN
         else:
             self.loss_G_GAN = 0.0
 
