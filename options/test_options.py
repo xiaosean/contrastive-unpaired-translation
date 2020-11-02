@@ -22,6 +22,7 @@ class TestOptions(BaseOptions):
         parser.add_argument('--continue_train', action='store_true', help='continue training: load the latest model')
         parser.add_argument('--use_data_augmentation', action='store_true',
                             help='use data augmentation while training to fit selfie2anime')
+        parser.add_argument('--hinge_loss', action='store_true', help='Apply hinge loss to train model')
 
         # To avoid cropping, the load_size should be the same as crop_size
         parser.set_defaults(load_size=parser.get_default('crop_size'))
