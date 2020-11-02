@@ -292,7 +292,7 @@ def define_D(input_nc, ndf, netD, n_layers_D=3, norm='batch', init_type='normal'
     Parameters:
         input_nc (int)     -- the number of channels in input images
         ndf (int)          -- the number of filters in the first conv layer
-        netD (str)         -- the architecture's name: basic | n_layers | pixel
+        netD (str)         -- the architecture's name: basic | n_layers | pixel | basic_sn |self_attn
         n_layers_D (int)   -- the number of conv layers in the discriminator; effective when netD=='n_layers'
         norm (str)         -- the type of normalization layers used in the network.
         init_type (str)    -- the name of the initialization method.
@@ -326,9 +326,14 @@ def define_D(input_nc, ndf, netD, n_layers_D=3, norm='batch', init_type='normal'
     elif netD == 'pixel':     # classify if each pixel is real or fake
         net = PixelDiscriminator(input_nc, ndf, norm_layer=norm_layer)
     elif netD == 'basic_sn':  # more options
-        # TODO: norm_layer = sn
         print("basic sn")
         net = NLayerDiscriminator(input_nc, ndf, n_layers=3, norm_layer=spectral_norm, no_antialias=no_antialias,)
+    elif netD == 'basic_sn':  # more options
+        print("basic sn")
+        net = NLayerDiscriminator(input_nc, ndf, n_layers=3, norm_layer=spectral_norm, no_antialias=no_antialias,)
+    elif netD == 'self_attn':  # more options
+        print("self_attn")
+        net = SelfAttnDiscriminator(input_nc, ndf, n_layers=3, norm_layer=spectral_norm, no_antialias=no_antialias,)
     elif 'stylegan2' in netD:
         net = StyleGAN2Discriminator(input_nc, ndf, n_layers_D, no_antialias=no_antialias, opt=opt)
     else:
@@ -1364,6 +1369,65 @@ class NLayerDiscriminator(nn.Module):
         """Standard forward."""
         return self.model(input)
 
+class SelfAttnDiscriminator(nn.Module):
+    """Defines a PatchGAN discriminator"""
+    # TODO: Try .network/self_attn_coord
+    # Follow this repo: https://github.com/heykeetae/Self-Attention-GAN/blob/master/sagan_models.py
+    def __init__(self, input_nc, ndf=64, n_layers=3, norm_layer=spectral_norm, no_antialias=False):
+        """Construct a PatchGAN discriminator
+
+        Parameters:
+            input_nc (int)  -- the number of channels in input images
+            ndf (int)       -- the number of filters in the last conv layer
+            n_layers (int)  -- the number of conv layers in the discriminator
+            norm_layer      -- normalization layer
+        """
+        super(SelfAttnDiscriminator, self).__init__()
+        if type(norm_layer) == functools.partial:  # no need to use bias as BatchNorm2d has affine parameters
+            use_bias = norm_layer.func == nn.InstanceNorm2d
+        else:
+            use_bias = norm_layer == nn.InstanceNorm2d
+
+        kw = 4
+        padw = 1
+        if(no_antialias):
+            sequence = [nn.Conv2d(input_nc, ndf, kernel_size=kw, stride=2, padding=padw), nn.LeakyReLU(0.2, True)]
+        elif norm_layer == spectral_norm:
+            sequence = [norm_layer(nn.Conv2d(input_nc, ndf, kernel_size=kw, stride=1, padding=padw)), nn.LeakyReLU(0.2, True), Downsample(ndf)]
+        else:
+            sequence = [nn.Conv2d(input_nc, ndf, kernel_size=kw, stride=1, padding=padw), nn.LeakyReLU(0.2, True), Downsample(ndf)]
+        nf_mult = 1
+        nf_mult_prev = 1
+        for n in range(1, n_layers):  # gradually increase the number of filters
+            nf_mult_prev = nf_mult
+            nf_mult = min(2 ** n, 8)
+            sequence += [
+                norm_layer(nn.Conv2d(ndf * nf_mult_prev, ndf * nf_mult, kernel_size=kw, stride=1, padding=padw, bias=use_bias)),
+                nn.LeakyReLU(0.2, True),
+                Downsample(ndf * nf_mult)]
+
+        nf_mult_prev = nf_mult
+        nf_mult = min(2 ** n_layers, 8)
+        sequence += [
+            norm_layer(nn.Conv2d(ndf * nf_mult_prev, ndf * nf_mult, kernel_size=kw, stride=1, padding=padw, bias=use_bias)),
+            nn.LeakyReLU(0.2, True)
+        ]
+
+
+        # Apply Self-attention in second of last layer
+        sequence += [Self_Attn(ndf * nf_mult)]
+
+        sequence += [
+            norm_layer(nn.Conv2d(ndf * nf_mult, 1, kernel_size=kw, stride=1, padding=padw))]  # output 1 channel prediction map
+
+
+        self.model = nn.Sequential(*sequence)
+
+    def forward(self, input):
+        """Standard forward."""
+        return self.model(input)
+
+
 
 class PixelDiscriminator(nn.Module):
     """Defines a 1x1 PatchGAN discriminator (pixelGAN)"""
@@ -1426,3 +1490,107 @@ class GroupedChannelNorm(nn.Module):
         std = x.std(dim=2, keepdim=True)
         x_norm = (x - mean) / (std + 1e-7)
         return x_norm.view(*shape)
+
+
+##################################################################################
+# Attention Models
+##################################################################################
+class Self_Attn(nn.Module):
+    """ Self attention Layer"""
+    def __init__(self, in_dim, key_channel=None, use_input=True, use_gamma=True):
+        super(Self_Attn, self).__init__()
+        self.chanel_in = in_dim
+        if key_channel is None:
+            key_channel = in_dim // 8
+        self.query_conv = nn.Conv2d(in_channels=in_dim, out_channels=key_channel, kernel_size=1)
+        self.key_conv = nn.Conv2d(in_channels=in_dim, out_channels=key_channel, kernel_size=1)
+        self.value_conv = nn.Conv2d(in_channels=in_dim, out_channels=in_dim, kernel_size=1)
+        self.gamma = nn.Parameter(torch.zeros(1))
+        self.use_gamma = use_gamma
+        self.use_input = use_input
+        self.softmax = nn.Softmax(dim=-1)  #
+
+    def forward(self, x):
+        """
+            inputs :
+                x : input feature maps( B X C X W X H)
+            returns :
+                out : self attention value + input feature
+                attention: B X N X N (N is Width*Height)
+        """
+        m_batchsize, C, width, height = x.size()
+        proj_query = self.query_conv(x).view(m_batchsize, -1, width * height).permute(0, 2, 1)  # B X CX(N)
+        proj_key = self.key_conv(x).view(m_batchsize, -1, width * height)  # B X C x (*W*H)
+        energy = torch.bmm(proj_query, proj_key)  # transpose check
+        attention = self.softmax(energy)  # BX (N) X (N)
+        proj_value = self.value_conv(x).view(m_batchsize, -1, width * height)  # B X C X N
+
+        out = torch.bmm(proj_value, attention.permute(0, 2, 1))
+        out = out.view(m_batchsize, C, width, height)
+
+        if self.use_gamma:
+            out = self.gamma * out
+
+        if self.use_input:
+            out += x
+
+        return out
+
+
+class Self_Attn_Coord(nn.Module):
+    """ Self attention Layer"""
+    def __init__(self, in_dim, key_channel=None, use_input=True, use_gamma=True):
+        super(Self_Attn_Coord, self).__init__()
+        self.chanel_in = in_dim
+        if key_channel is None:
+            key_channel = in_dim // 8
+        self.query_conv = nn.Conv2d(in_channels=in_dim, out_channels=key_channel, kernel_size=1)
+        self.key_conv = nn.Conv2d(in_channels=in_dim, out_channels=key_channel, kernel_size=1)
+        self.value_conv = nn.Conv2d(in_channels=in_dim+2, out_channels=in_dim, kernel_size=1)
+        self.gamma = nn.Parameter(torch.zeros(1))
+        self.use_gamma = use_gamma
+        self.use_input = use_input
+        self.softmax = nn.Softmax(dim=-1)  #
+
+    def _add_xy_index_channels(self, img):
+        h_s = img.shape[-2]
+        w_s = img.shape[-1]
+        c_y_index = np.expand_dims(np.tile(np.arange(h_s), w_s).reshape(w_s, h_s).T, 2) / (h_s - 1)
+        c_x_index = np.tile(np.arange(w_s), h_s).T.reshape(h_s, w_s, 1) / (w_s - 1)
+        c_y_index = torch.tensor(c_y_index,
+                                 dtype=torch.float64,
+                                 device=torch.device('cuda:0')).float().cuda().view(1, 1, h_s, w_s)
+        c_x_index = torch.tensor(c_x_index,
+                                 dtype=torch.float64,
+                                 device=torch.device('cuda:0')).float().cuda().view(1, 1, h_s, w_s)
+
+        # img_extended = np.concatenate([img, c_y_index, c_x_index], 2).copy()
+        img_extended = torch.cat([img, c_y_index, c_x_index], 1)
+
+        return img_extended
+
+    def forward(self, x):
+        """
+            inputs :
+                x : input feature maps( B X C X W X H)
+            returns :
+                out : self attention value + input feature
+                attention: B X N X N (N is Width*Height)
+        """
+        m_batchsize, C, width, height = x.size()
+        proj_query = self.query_conv(x).view(m_batchsize, -1, width * height).permute(0, 2, 1)  # B X CX(N)
+        proj_key = self.key_conv(x).view(m_batchsize, -1, width * height)  # B X C x (*W*H)
+        energy = torch.bmm(proj_query, proj_key)  # transpose check
+        attention = self.softmax(energy)  # BX (N) X (N)
+        proj_value = self.value_conv(self._add_xy_index_channels(x)).view(m_batchsize, -1, width * height)  # B X C X N
+
+        out = torch.bmm(proj_value, attention.permute(0, 2, 1))
+        out = out.view(m_batchsize, C, width, height)
+
+        if self.use_gamma:
+            out = self.gamma * out
+
+        if self.use_input:
+            out += x
+
+        return out
