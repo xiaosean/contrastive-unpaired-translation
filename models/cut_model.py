@@ -166,7 +166,6 @@ class CUTModel(BaseModel):
     def compute_D_loss(self):
         """Calculate GAN loss for the discriminator"""
         if self.opt.hinge_loss:
-            print("compute_D_loss - run hinge loss")
             # Following SPADE code:https://github.com/NVlabs/SPADE/blob/0ff661e70131c9b85091d11a66e019c0f2062d4c/models/networks/loss.py
 
             # Target is real
@@ -203,7 +202,6 @@ class CUTModel(BaseModel):
         if self.opt.lambda_GAN > 0.0:
             pred_fake = self.netD(fake)
             if self.opt.hinge_loss:
-                print("compute_G_loss - run hinge loss")
                 self.loss_G_GAN = -torch.mean(pred_fake) * self.opt.lambda_GAN
             else:
                 self.loss_G_GAN = self.criterionGAN(pred_fake, True).mean() * self.opt.lambda_GAN
