@@ -1417,6 +1417,9 @@ class SelfAttnDiscriminator(nn.Module):
         # Apply Self-attention in second of last layer
         sequence += [Self_Attn(ndf * nf_mult)]
 
+        # Apply Self-attention coord in second of last layer
+        # sequence += [Self_Attn_Coord(ndf * nf_mult)]
+
         sequence += [
             norm_layer(nn.Conv2d(ndf * nf_mult, 1, kernel_size=kw, stride=1, padding=padw))]  # output 1 channel prediction map
 
