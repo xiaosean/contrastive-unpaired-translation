@@ -51,9 +51,11 @@ class PatchNCELoss(nn.Module):
         # print(l_pos.size()) -> torch.Size([256, 1])
         # print(l_neg.size()) -> torch.Size([256, 256])
         # print(out.size()) -> torch.Size([256, 257])
-        pos_neg_label = torch.cat((torch.ones(1, dtype=torch.long, device=feat_q.device)
-                                   , torch.zeros(out.size(0) - 1, dtype=torch.long, device=feat_q.device)), 0)
+        # pos_neg_label = torch.cat((torch.ones(1, dtype=torch.long, device=feat_q.device)
+        #                            , torch.zeros(out.size(0) - 1, dtype=torch.long, device=feat_q.device)), 0)
+        # loss = self.cross_entropy_loss(out, pos_neg_label)
+        loss = self.cross_entropy_loss(out, torch.zeros(out.size(0), dtype=torch.long,
+                                                        device=feat_q.device))
 
-        loss = self.cross_entropy_loss(out, pos_neg_label)
 
         return loss
