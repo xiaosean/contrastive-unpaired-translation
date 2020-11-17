@@ -209,12 +209,12 @@ class CUTModel(BaseModel):
             self.loss_G_GAN = 0.0
 
         if self.opt.lambda_NCE > 0.0:
-            self.loss_NCE = self.calculate_NCE_loss(self.real_A, self.fake_B)
+            self.loss_NCE = self.calculate_NCE_loss(self.real_A, self.fake_B, idt_loss=False)
         else:
             self.loss_NCE, self.loss_NCE_bd = 0.0, 0.0
 
         if self.opt.nce_idt and self.opt.lambda_NCE > 0.0:
-            self.loss_NCE_Y = self.calculate_NCE_loss(self.real_B, self.idt_B)
+            self.loss_NCE_Y = self.calculate_NCE_loss(self.real_B, self.idt_B, idt_loss=True)
             loss_NCE_both = (self.loss_NCE + self.loss_NCE_Y) * 0.5
         else:
             loss_NCE_both = self.loss_NCE
@@ -222,7 +222,7 @@ class CUTModel(BaseModel):
         self.loss_G = self.loss_G_GAN + loss_NCE_both
         return self.loss_G
 
-    def calculate_NCE_loss(self, src, tgt):  # realA, fakeB
+    def calculate_NCE_loss(self, src, tgt, idt_loss=False):  # realA, fakeB
         n_layers = len(self.nce_layers)  # nce_layers: 0,4,8,12,16
         feat_q = self.netG(tgt, self.nce_layers, encode_only=True)
         if self.opt.flip_equivariance and self.flipped_for_equivariance:
@@ -233,7 +233,10 @@ class CUTModel(BaseModel):
         feat_q_pool, _ = self.netF(feat_q, self.opt.num_patches, sample_ids)
         total_nce_loss = 0.0
         for f_q, f_k, crit, nce_layer in zip(feat_q_pool, feat_k_pool, self.criterionNCE, self.nce_layers):
-            loss = crit(f_q, f_k) * self.opt.lambda_NCE
+            if idt_loss:
+                loss = crit(f_q, f_k) * self.opt.lambda_NCE
+            else:
+                loss = crit(f_q, f_k) * 0
             total_nce_loss += loss.mean()
 
         return total_nce_loss / n_layers
