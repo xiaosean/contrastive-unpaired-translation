@@ -182,12 +182,12 @@ class CUTModel(BaseModel):
             self.loss_G_GAN = 0.0
 
         if self.opt.lambda_NCE > 0.0:
-            self.loss_NCE = self.calculate_NCE_loss(self.real_A, self.fake_B)
+            self.loss_NCE = self.calculate_NCE_loss(self.real_A, self.fake_B, use_last_layer=True)
         else:
             self.loss_NCE, self.loss_NCE_bd = 0.0, 0.0
 
         if self.opt.nce_idt and self.opt.lambda_NCE > 0.0:
-            self.loss_NCE_Y = self.calculate_NCE_loss(self.real_B, self.idt_B)
+            self.loss_NCE_Y = self.calculate_NCE_loss(self.real_B, self.idt_B, use_last_layer=False)
             loss_NCE_both = (self.loss_NCE + self.loss_NCE_Y) * 0.5
         else:
             loss_NCE_both = self.loss_NCE
@@ -195,17 +195,26 @@ class CUTModel(BaseModel):
         self.loss_G = self.loss_G_GAN + loss_NCE_both
         return self.loss_G
 
-    def calculate_NCE_loss(self, src, tgt):  # realA, fakeB
-        n_layers = len(self.nce_layers)  # nce_layers: 0,4,8,12,16
-        feat_q = self.netG(tgt, self.nce_layers, encode_only=True)
+    def calculate_NCE_loss(self, src, tgt, use_last_layer=False):  # realA, fakeB
+        # n_layers = len(self.nce_layers)  # nce_layers: 0,4,8,12,16
+
+        if use_last_layer:
+            nce_layers = [self.nce_layers[-1]]
+        else:
+            nce_layers = self.nce_layers
+
+        n_layers = len(nce_layers)
+        if use_last_layer:
+            assert n_layers == 1
+        feat_q = self.netG(tgt, nce_layers, encode_only=True)
         if self.opt.flip_equivariance and self.flipped_for_equivariance:
             feat_q = [torch.flip(fq, [3]) for fq in feat_q]
 
-        feat_k = self.netG(src, self.nce_layers, encode_only=True)
+        feat_k = self.netG(src, nce_layers, encode_only=True)
         feat_k_pool, sample_ids = self.netF(feat_k, self.opt.num_patches, None)
         feat_q_pool, _ = self.netF(feat_q, self.opt.num_patches, sample_ids)
         total_nce_loss = 0.0
-        for f_q, f_k, crit, nce_layer in zip(feat_q_pool, feat_k_pool, self.criterionNCE, self.nce_layers):
+        for f_q, f_k, crit, nce_layer in zip(feat_q_pool, feat_k_pool, self.criterionNCE, nce_layers):
             loss = crit(f_q, f_k) * self.opt.lambda_NCE
             total_nce_loss += loss.mean()
 
