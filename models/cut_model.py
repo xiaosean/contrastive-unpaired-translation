@@ -3,6 +3,7 @@ import torch
 from .base_model import BaseModel
 from . import networks
 from .patchnce import PatchNCELoss
+from .nlnl_loss import PatchNLLoss
 import util.util as util
 
 
@@ -23,6 +24,7 @@ class CUTModel(BaseModel):
 
         parser.add_argument('--lambda_GAN', type=float, default=1.0, help='weight for GAN loss：GAN(G(X))')
         parser.add_argument('--lambda_NCE', type=float, default=1.0, help='weight for NCE loss: NCE(G(X), X)')
+        parser.add_argument('--lambda_NLNL', type=float, default=1.0, help='weight for PatchNL loss: PatchNL(G(X), X)')
         parser.add_argument('--nce_idt', type=util.str2bool, nargs='?', const=True, default=False, help='use NCE loss for identity mapping: NCE(G(Y), Y))')
         parser.add_argument('--nce_layers', type=str, default='0,4,8,12,16', help='compute NCE loss on which layers')
         parser.add_argument('--nce_includes_all_negatives_from_minibatch',
@@ -82,11 +84,14 @@ class CUTModel(BaseModel):
             # define loss functions
             self.criterionGAN = networks.GANLoss(opt.gan_mode).to(self.device)
             self.criterionNCE = []
-
+            self.criterionNL = []
             for nce_layer in self.nce_layers:
                 self.criterionNCE.append(PatchNCELoss(opt).to(self.device))
+                self.criterionNL.append(PatchNLLoss(opt).to(self.device))
 
             self.criterionIdt = torch.nn.L1Loss().to(self.device)
+
+
             self.optimizer_G = torch.optim.Adam(self.netG.parameters(), lr=opt.lr, betas=(opt.beta1, opt.beta2))
             self.optimizer_D = torch.optim.Adam(self.netD.parameters(), lr=opt.lr, betas=(opt.beta1, opt.beta2))
             self.optimizers.append(self.optimizer_G)
@@ -233,10 +238,18 @@ class CUTModel(BaseModel):
         feat_q_pool, _ = self.netF(feat_q, self.opt.num_patches, sample_ids)
         total_nce_loss = 0.0
         for f_q, f_k, crit, nce_layer in zip(feat_q_pool, feat_k_pool, self.criterionNCE, self.nce_layers):
-            if idt_loss:
-                loss = crit(f_q, f_k) * self.opt.lambda_NCE
-            else:
-                loss = crit(f_q, f_k) * 0
+            loss = crit(f_q, f_k) * self.opt.lambda_NCE
             total_nce_loss += loss.mean()
 
-        return total_nce_loss / n_layers
+        total_nlnl_loss = 0.0
+        # Note: lambda_NCE = 1.0
+        # Note: lambda_NLNL = 1.0
+        # Resample, avoid to overfitting the same patch as NCE Loss
+        feat_k_pool, sample_ids = self.netF(feat_k, self.opt.num_patches, None)
+        feat_q_pool, _ = self.netF(feat_q, self.opt.num_patches, sample_ids)
+        for f_q, f_k, crit, nce_layer in zip(feat_q_pool, feat_k_pool, self.criterionNL, self.nce_layers):
+            loss = crit(f_q, f_k) * self.opt.lambda_NLNL
+            total_nlnl_loss += loss.mean()
+        # print("total_nce_loss =", total_nce_loss)
+        # print("total_nlnl_loss =", total_nlnl_loss)
+        return (total_nce_loss+total_nlnl_loss) / n_layers
