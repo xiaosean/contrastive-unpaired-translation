@@ -4,6 +4,7 @@ from .base_model import BaseModel
 from . import networks
 from .patchnce import PatchNCELoss
 import util.util as util
+import os, cv2, time
 
 
 class CUTModel(BaseModel):
@@ -202,11 +203,17 @@ class CUTModel(BaseModel):
             feat_q = [torch.flip(fq, [3]) for fq in feat_q]
 
         feat_k = self.netG(src, self.nce_layers, encode_only=True)
-        feat_k_pool, sample_ids = self.netF(feat_k, self.opt.num_patches, None)
-        feat_q_pool, _ = self.netF(feat_q, self.opt.num_patches, sample_ids)
+        feat_k_pool, feat_k_pool_ours, sample_ids, sample_ids_ours = self.netF(feat_k, self.opt.num_patches, None, None)
+        feat_q_pool, feat_q_pool_ours,  _, _ = self.netF(feat_q, self.opt.num_patches, sample_ids, sample_ids_ours)
         total_nce_loss = 0.0
-        for f_q, f_k, crit, nce_layer in zip(feat_q_pool, feat_k_pool, self.criterionNCE, self.nce_layers):
-            loss = crit(f_q, f_k) * self.opt.lambda_NCE
+        for f_q, f_q_ours, f_k, f_k_ours, crit, nce_layer, ori_feat_k in zip(feat_q_pool, feat_q_pool_ours, feat_k_pool, feat_k_pool_ours, self.criterionNCE, self.nce_layers, feat_k):
+            loss, heatmap = crit(f_q, f_q_ours, f_k, f_k_ours, ori_feat_k.shape)
+            loss = loss * self.opt.lambda_NCE
             total_nce_loss += loss.mean()
+            cv2.imwrite(os.path.join("./heatmap/", 'heatmap_%d.png' % nce_layer), heatmap)
+
+        util.save_image(util.tensor2im(src), os.path.join("./heatmap/", 'src.png'))
+        util.save_image(util.tensor2im(tgt), os.path.join("./heatmap/", 'tgt.png'))
+        time.sleep(2)
 
         return total_nce_loss / n_layers

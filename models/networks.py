@@ -550,9 +550,11 @@ class PatchSampleF(nn.Module):
         init_net(self, self.init_type, self.init_gain, self.gpu_ids)
         self.mlp_init = True
 
-    def forward(self, feats, num_patches=64, patch_ids=None):
+    def forward(self, feats, num_patches=64, patch_ids=None, patch_ids_ours=None):
         return_ids = []
+        return_ids_ours = []
         return_feats = []
+        return_feats_ours = []
         if self.use_mlp and not self.mlp_init:
             self.create_mlp(feats)
         for feat_id, feat in enumerate(feats):
@@ -562,25 +564,35 @@ class PatchSampleF(nn.Module):
             if num_patches > 0:
                 if patch_ids is not None:
                     patch_id = patch_ids[feat_id]
+                    patch_id_ours = patch_ids_ours[feat_id]
                 else:
+                    patch_id_ours = torch.tensor(list(range(feat_reshape.shape[1])), dtype=torch.long, device=feats[0].device)
                     patch_id = torch.randperm(feat_reshape.shape[1], device=feats[0].device)
                     patch_id = patch_id[:int(min(num_patches, patch_id.shape[0]))]  # .to(patch_ids.device)
                 x_sample = feat_reshape[:, patch_id, :].flatten(0, 1)  # reshape(-1, x.shape[1])
+                x_sample_ours = feat_reshape[:, patch_id_ours, :].flatten(0, 1)
             else:
                 x_sample = feat_reshape
+                x_sample_ours = feat_reshape
                 patch_id = []
+                patch_id_ours = []
             if self.use_mlp:
                 mlp = getattr(self, 'mlp_%d' % feat_id)
                 x_sample = mlp(x_sample)
+                x_sample_ours = mlp(x_sample_ours)
+            return_ids_ours.append(patch_id_ours)
             return_ids.append(patch_id)
             x_sample = self.l2norm(x_sample)
+            x_sample_ours = self.l2norm(x_sample_ours)
 
             if num_patches == 0:
                 x_sample = x_sample.permute(0, 2, 1).reshape([B, x_sample.shape[-1], H, W])
+                x_sample_ours = x_sample_ours.permute(0, 2, 1).reshape([B, x_sample_ours.shape[-1], H, W])
             # print("x_sample.shape =", x_sample.shape)
             return_feats.append(x_sample)
+            return_feats_ours.append(x_sample_ours)
         # print("return_feats size =", len(return_feats))
-        return return_feats, return_ids
+        return return_feats, return_feats_ours, return_ids, return_ids_ours
 
 
 class G_Resnet(nn.Module):
