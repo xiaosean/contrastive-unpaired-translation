@@ -128,6 +128,13 @@ def get_transform(opt, params=None, grayscale=False, method=Image.BICUBIC, conve
             transform_list += [transforms.Normalize((0.5,), (0.5,))]
         else:
             transform_list += [transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))]
+
+    if opt.use_data_augmentation:
+        transform_list = [transforms.ColorJitter(hue=0.15),
+                          transforms.RandomGrayscale(p=0.25),
+                          transforms.RandomRotation(35),
+                          transforms.RandomPerspective(distortion_scale=0.35)] + transform_list
+
     return transforms.Compose(transform_list)
 
 

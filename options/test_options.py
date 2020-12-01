@@ -20,6 +20,8 @@ class TestOptions(BaseOptions):
         parser.add_argument('--epoch_count', type=int, default=1,
                             help='the starting epoch count, we save the model by <epoch_count>, <epoch_count>+<save_latest_freq>, ...')
         parser.add_argument('--continue_train', action='store_true', help='continue training: load the latest model')
+        parser.add_argument('--use_data_augmentation', action='store_true',
+                            help='use data augmentation while training to fit selfie2anime')
 
         # To avoid cropping, the load_size should be the same as crop_size
         parser.set_defaults(load_size=parser.get_default('crop_size'))
