@@ -6,6 +6,9 @@ from .patchnce import PatchNCELoss
 from .nlnl_loss import PatchNLLoss
 import util.util as util
 
+import os, sys
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "../"))
+from contextual_loss_pytorch.contextual_loss.modules import contextual
 
 class CUTModel(BaseModel):
     """ This class implements CUT and FastCUT model, described in the paper
@@ -90,7 +93,7 @@ class CUTModel(BaseModel):
                 self.criterionNL.append(PatchNLLoss(opt).to(self.device))
 
             self.criterionIdt = torch.nn.L1Loss().to(self.device)
-
+            self.contextualLoss = contextual.ContextualLoss().to(self.device)
 
             self.optimizer_G = torch.optim.Adam(self.netG.parameters(), lr=opt.lr, betas=(opt.beta1, opt.beta2))
             self.optimizer_D = torch.optim.Adam(self.netD.parameters(), lr=opt.lr, betas=(opt.beta1, opt.beta2))
@@ -242,6 +245,7 @@ class CUTModel(BaseModel):
             total_nce_loss += loss.mean()
 
         total_nlnl_loss = 0.0
+        total_cx_loss = 0.0
         # Note: lambda_NCE = 1.0
         # Note: lambda_NLNL = 0.1
         # Resample, avoid to overfitting the same patch as NCE Loss
@@ -250,6 +254,10 @@ class CUTModel(BaseModel):
         for f_q, f_k, crit, nce_layer in zip(feat_q_pool, feat_k_pool, self.criterionNL, self.nce_layers):
             loss = crit(f_q, f_k) * self.opt.lambda_NLNL
             total_nlnl_loss += loss.mean()
+
+        for f_q, f_k, nce_layer in zip(feat_q[3:], feat_k[3:], self.nce_layers[3:]):
+            total_cx_loss += self.contextualLoss(f_q, f_k)
         # print("total_nce_loss =", total_nce_loss)
         # print("total_nlnl_loss =", total_nlnl_loss)
+        # print("total_cx_loss = ", total_cx_loss)
         return (total_nce_loss+total_nlnl_loss) / n_layers
