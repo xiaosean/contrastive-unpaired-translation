@@ -6,6 +6,7 @@ import functools
 from torch.optim import lr_scheduler
 import numpy as np
 import torch.nn.utils.spectral_norm as spectral_norm
+import util.util as util
 
 from .stylegan_networks import StyleGAN2Discriminator, StyleGAN2Generator, TileStyleGAN2Discriminator
 
@@ -561,7 +562,7 @@ class PatchSampleF(nn.Module):
         init_net(self, self.init_type, self.init_gain, self.gpu_ids)
         self.mlp_init = True
 
-    def forward(self, feats, num_patches=64, patch_ids=None):
+    def forward(self, feats, num_patches=64, patch_ids=None, label=None):
         return_ids = []
         return_feats = []
         if self.use_mlp and not self.mlp_init:
@@ -576,7 +577,24 @@ class PatchSampleF(nn.Module):
                 else:
                     patch_id = torch.randperm(feat_reshape.shape[1], device=feats[0].device)
                     patch_id = patch_id[:int(min(num_patches, patch_id.shape[0]))]  # .to(patch_ids.device)
-                x_sample = feat_reshape[:, patch_id, :].flatten(0, 1)  # reshape(-1, x.shape[1])
+
+                if feat_id == 0 and label is not None:
+                    feat_mean = torch.tensor(mean_image(util.tensor2im(feat), label))
+                    x_sample = feat_mean[patch_id, :].to(feats[0].device, torch.float32)
+                else:
+                    x_sample = feat_reshape[:, patch_id, :].flatten(0, 1)  # reshape(-1, x.shape[1])
+                    # res = [[0, 0, 0, 0] for i in range(int(max(label.reshape(-1)) + 1))]
+                    # # R, G, B, count
+                    # for i, value in enumerate(label.reshape(-1)):
+                    #     res[value][0] += feat_reshape[:, i, 0]
+                    #     res[value][1] += feat_reshape[:, i, 1]
+                    #     res[value][2] += feat_reshape[:, i, 2]
+                    #     res[value][3] += 1
+                    #
+                    # for i in range(patch_id.size(0)):
+                    #     idx = patch_id[i].cpu()
+                    #     k = label[idx // 262][idx % 262]
+                    #     x_sample[i] = torch.tensor([res[k][0] // res[k][3], res[k][1] // res[k][3], res[k][2] // res[k][3]])
             else:
                 x_sample = feat_reshape
                 patch_id = []
@@ -592,6 +610,18 @@ class PatchSampleF(nn.Module):
             return_feats.append(x_sample)
         # print("return_feats size =", len(return_feats))
         return return_feats, return_ids
+
+
+def mean_image(image, label):
+    im_rp = image.reshape((image.shape[0] * image.shape[1], image.shape[2]))
+    sli_1d = np.reshape(label, -1)
+    uni = np.unique(sli_1d)
+    uu = np.zeros(im_rp.shape)
+    for i in uni:
+        loc = np.where(sli_1d == i)[0]
+        mm = np.mean(im_rp[loc, :], axis=0)
+        uu[loc, :] = mm
+    return uu
 
 
 class G_Resnet(nn.Module):
