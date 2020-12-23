@@ -4,6 +4,7 @@ from .base_model import BaseModel
 from . import networks
 from .patchnce import PatchNCELoss
 import util.util as util
+from skimage import segmentation
 
 
 class CUTModel(BaseModel):
@@ -202,8 +203,9 @@ class CUTModel(BaseModel):
             feat_q = [torch.flip(fq, [3]) for fq in feat_q]
 
         feat_k = self.netG(src, self.nce_layers, encode_only=True)
-        feat_k_pool, sample_ids = self.netF(feat_k, self.opt.num_patches, None)
-        feat_q_pool, _ = self.netF(feat_q, self.opt.num_patches, sample_ids)
+        label = segmentation.slic(util.tensor2im(feat_k[0]), compactness=10, n_segments=100, start_label=0)
+        feat_k_pool, sample_ids = self.netF(feat_k, self.opt.num_patches, None, label)
+        feat_q_pool, _ = self.netF(feat_q, self.opt.num_patches, sample_ids, label)
         total_nce_loss = 0.0
         for f_q, f_k, crit, nce_layer in zip(feat_q_pool, feat_k_pool, self.criterionNCE, self.nce_layers):
             loss = crit(f_q, f_k) * self.opt.lambda_NCE
