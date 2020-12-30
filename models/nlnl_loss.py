@@ -10,6 +10,7 @@ class PatchNLLoss(nn.Module):
         self.opt = opt
         # self.criterion_nl =nn.NLLLoss()(reduce=False)
         self.criterion_nl = nn.NLLLoss()
+        self.softmax = nn.Softmax(dim=-1)
 
         self.mask_dtype = torch.uint8 if version.parse(torch.__version__) < version.parse('1.2.0') else torch.bool
 
@@ -52,6 +53,7 @@ class PatchNLLoss(nn.Module):
         l_neg = l_neg_curbatch.view(-1, npatches)  # [batchSize, batchSize]
 
         out = torch.cat((l_pos, l_neg), dim=1) / self.opt.nce_T  # pos + neg -> [batchSize, batchSize + 1]
+        out = torch.log(torch.clamp(1. - self.softmax(out), min=1e-5, max=1.))
 
         # Shift the label as negative learning
         out_patch = batchSize + 1 # [pos(256), neg(256)] = 257
